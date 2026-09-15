@@ -23,7 +23,7 @@ Detailed guides for every gstack skill — philosophy, workflow, and examples.
 | [`/land-and-deploy`](#land-and-deploy) | **Release Engineer** | Merge the PR, wait for CI and deploy, verify production health. One command from "approved" to "verified in production." |
 | [`/canary`](#canary) | **SRE** | Post-deploy monitoring loop. Watches for console errors, performance regressions, and page failures in your Aside browser. |
 | [`/benchmark`](#benchmark) | **Performance Engineer** | Baseline page load times, Core Web Vitals, and resource sizes. Compare before/after on every PR. Track trends over time. |
-| [`/cso`](#cso) | **Chief Security Officer** | OWASP Top 10 + STRIDE threat modeling security audit. Scans for injection, auth, crypto, and access control issues. |
+| [`/cso`](#cso) | **Chief Security Officer** | Supported security findings with explicit coverage. Static assessment remains available without catalog profiles; contained runtime/scanner execution requires matching qualified profiles. Runtime-tested bundles authenticate separate external assertions. Project-test completion remains `self_reported` because target code controls the test process; `tested` is reserved for a future target-independent completion witness. |
 | [`/document-release`](#document-release) | **Technical Writer** | Update all project docs to match what you just shipped. Catches stale READMEs automatically. |
 | [`/document-generate`](#document-generate) | **Technical Writer** | Generate Diataxis docs (tutorial / how-to / reference / explanation) for a feature from code. |
 | [`/retro`](#retro) | **Eng Manager** | Team-aware weekly retro. Per-person breakdowns, shipping streaks, test health trends, growth opportunities. |
@@ -251,6 +251,12 @@ Every review (CEO, Eng, Design) logs its result. At the end of each review, you 
 ```
 
 Eng Review is the only required gate (disable with `gstack-config set skip_eng_review true`). CEO and Design are informational — recommended for product and UI changes respectively.
+
+Diff reviews use the `review_freshness` grade computed by `gstack-review-read`, shared by `/ship` and `/land-and-deploy`. CURRENT requires a clean, reviewer-reported completed and converged pass whose captured start and finish fingerprints match the current working-tree content. Tracked edits and non-ignored untracked source both count; an identical commit hash or zero commits since review is not a fallback.
+
+A captured pass with different start/end content grades STALE, as does a previously verified pass whose fingerprint no longer matches. Missing or reused start receipts, legacy log-only records, incomplete or nonconverged passes, and unresolved findings cannot grade CURRENT; missing evidence grades UNVERIFIED. Ship telemetry is not a review pass. After fixes, run a genuine full re-review with a new start receipt rather than capturing one only to log the result. Completion remains reviewer-reported, not independent proof that a model read the source.
+
+Plan-file reviews retain their existing seven-day freshness handling and optional plan-hash comparison; repository-content rules do not apply to them. A diff review must grade CURRENT before it can clear Eng Review, in addition to the dashboard's existing age and clean-status requirements.
 
 ### Plan-to-QA flow
 
@@ -760,19 +766,19 @@ Claude: Benchmarking 5 pages (3 runs each)...
 
 This is my **Chief Security Officer**.
 
-Run `/cso` on any codebase and it performs an OWASP Top 10 + STRIDE threat model audit. It scans for injection vulnerabilities, broken authentication, sensitive data exposure, XML external entities, broken access control, security misconfiguration, XSS, insecure deserialization, known-vulnerable components, and insufficient logging. Each finding includes severity, evidence, and a recommended fix.
+Run `/cso` for a bounded static investigation with an application model, challenged findings, and explicit coverage; static assessment remains available when no runtime or scanner catalog profile is qualified. With matching qualified profiles, `/cso --comprehensive` can prepare Node/Bun, Python, and Rails applications in contained local runtimes, reproduce a defect, and retain a reviewable repair candidate without changing the working branch. An out-of-process witness can authenticate the external boot, legitimate-control, and security assertions and issue a `runtime_tested` bundle. Project-test completion remains `self_reported` because target code shares that process and can forge reporter output or terminate the runner; recorded command, count, exit, and output hashes are diagnostic evidence, not a target-independent completion witness. Every report shows assertion, test-completion, and review assurance separately. The `tested` state is reserved for a future target-independent witness and is not emitted today. `/cso --doctor`, `--resume`, `--replay`, and `--recheck` diagnose prerequisites, recover interrupted work, repeat recorded verification, and establish current-source closure from fresh evidence.
 
 ```
 You:   /cso
 
-Claude: Running OWASP Top 10 + STRIDE security audit...
+Claude: complete — assessed application routes, tenant authorization, secrets,
+        dependency exposure, and deployment configuration.
 
-        CRITICAL: SQL injection in user search (app/models/user.rb:47)
-        HIGH: Session tokens stored in localStorage (app/frontend/auth.ts:12)
-        MEDIUM: Missing rate limiting on /api/login endpoint
-        LOW: X-Frame-Options header not set
+        HIGH: Cross-tenant invoice access (app/controllers/invoices.rb:47)
+        Confidence: high — caller, middleware, and policy checks traced
+        Evidence: supported static finding; runtime not requested
 
-        4 findings across 12 files scanned. 1 critical, 1 high.
+        1 supported finding. Run ID: cso-…
 ```
 
 ---
@@ -1072,6 +1078,8 @@ independent of model selection.
 ### Three modes
 
 **Review** — run `codex review` against the current diff. Codex reads every changed file, classifies findings by severity (P1 critical, P2 high, P3 medium), and returns a PASS/FAIL verdict. Any P1 finding = FAIL. The review is fully independent — Codex doesn't see Claude's review.
+
+A severity-gate PASS is separate from [review freshness](#review-readiness-dashboard): unresolved recorded findings (`findings > findings_fixed`, with missing `findings_fixed` treated as zero) prevent CURRENT even when the gate passes. This does not change the severity gate. Fixes still require a new completed, unchanged review pass before the fixed tree can grade CURRENT.
 
 **Challenge** — adversarial mode. Codex actively tries to break your code. It looks for edge cases, race conditions, security holes, and assumptions that would fail under load. Uses maximum reasoning effort (`xhigh`). Think of it as a penetration test for your logic.
 
