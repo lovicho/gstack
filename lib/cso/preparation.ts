@@ -336,7 +336,7 @@ function inspectNode(root: string, plan: PreparationPlan) {
     '--userconfig',
     '/opt/cso/empty-config',
     '--globalconfig',
-    '/opt/cso/empty-config',
+    '/opt/cso/empty-globalconfig',
   ];
   const offline = [
     'ci',
@@ -348,7 +348,7 @@ function inspectNode(root: string, plan: PreparationPlan) {
     '--userconfig',
     '/opt/cso/empty-config',
     '--globalconfig',
-    '/opt/cso/empty-config',
+    '/opt/cso/empty-globalconfig',
   ];
   plan.acquisition.push(
     command('/usr/local/bin/npm', [...acquisition, '--registry', 'https://registry.npmjs.org'], '/metadata', {
@@ -369,7 +369,7 @@ function inspectNode(root: string, plan: PreparationPlan) {
         '--userconfig',
         '/opt/cso/empty-config',
         '--globalconfig',
-        '/opt/cso/empty-config',
+        '/opt/cso/empty-globalconfig',
       ],
       '/work',
     ),
@@ -988,17 +988,22 @@ function inspectRails(root: string, plan: PreparationPlan) {
       input.integrity = hash;
       input.integritySource = 'lock';
     }
-    // gem fetch downloads without evaluating a Gemfile/gemspec or building extensions.
+  }
+  // gem fetch downloads without evaluating a Gemfile/gemspec or building extensions.
+  // Each process loads the full RubyGems index (~11 s at the app role's CPU share),
+  // so all exact NAME:VERSION gems of one platform are fetched in one process.
+  const platforms = [...new Set(plan.inputs.map((input) => input.platform!))];
+  for (const platform of platforms) {
     plan.acquisition.push(
       command(
         '/usr/local/bin/gem',
         [
           'fetch',
-          input.name,
-          '--version',
-          input.version,
+          ...plan.inputs
+            .filter((input) => input.platform === platform)
+            .map((input) => `${input.name}:${input.version}`),
           '--platform',
-          input.platform!,
+          platform,
           '--clear-sources',
           '--source',
           'https://rubygems.org',
@@ -1022,8 +1027,12 @@ function inspectRails(root: string, plan: PreparationPlan) {
     BUNDLE_CACHE_PATH: '/archives',
     BUNDLE_USER_HOME: '/work/.cso-bundle',
   };
+  // One install thread. Ruby's File.umask getter sets the process umask to 0
+  // for an instant, and RubyGems calls it for every extracted file, so a second
+  // Bundler thread creating a directory in that window leaves it 0777 and the
+  // prepared-tree export correctly refuses it.
   plan.offline.push(
-    command('/usr/local/bin/bundle', ['install', '--local', '--jobs', '2', '--retry', '0'], '/work', env),
+    command('/usr/local/bin/bundle', ['install', '--local', '--jobs', '1', '--retry', '0'], '/work', env),
   );
   plan.registryHosts = ['rubygems.org', 'index.rubygems.org'];
   const declared = railsDatabaseConfiguration(read(root, 'config/database.yml', true));
