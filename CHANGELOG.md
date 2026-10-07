@@ -1,5 +1,91 @@
 # Changelog
 
+## [1.91.33.0] - 2026-10-06
+
+**A red eval case now gets one clear verdict from its measurement: meets, qualified, extend once, or fix.**
+**A weekly sweep measures main's flakiest gate cases before any ship hits them.**
+
+/ship already measured a red case alone before rerunning the gate, but every 8 out of 10 was "below target", even when both reds were a provider outage. Now the measurement follows one bar. 9/10 meets it. 8/10 meets it as qualified when every red is a proven provider error, judge noise at the threshold, or a model miss with a cited transcript line. 7/10, or an 8/10 that does not qualify, gets exactly one more batch on the identical tree and is decided once on all 20 trials. Anything else, and any timeout, hang, regression or known fixable cause, is a fix round. Separately, a new weekly workflow picks the gate cases that cost the gate's all-green chance the most and measures them on main, with a hard $150-a-week cap.
+
+### The numbers that matter
+
+The bar numbers are binomial for a case whose true per-trial pass rate is p (rule kind, 10 trials). The sweep numbers come from `bun run scripts/ship-measure.ts sweep --dry-run` against main's pass-rate history on 2026-10-06.
+
+| Case with true pass rate p | Clears the bar in one batch | Clears it with one extension (reds unqualified) | Clears it when every red qualifies |
+|---|---|---|---|
+| 0.95 (healthy) | 91.4% | 95.9% | 99.8% |
+| 0.90 | 73.6% | 80.4% | 97.2% |
+| 0.80 (flaky) | 37.6% | 40.8% | 75.3% |
+
+| Sweep, latest gate census | Value |
+|---|---|
+| Gate verdicts in the census | 106 |
+| Predicted all-green probability from history | 30.7% |
+| Cases flagged (top 5 by cost to that probability) | 87% to 91% per-trial pass rate each |
+| Estimated cost to measure all 5 at 10 trials | about $76, under the $150 weekly cap |
+
+A healthy 95% case used to be sent to a pointless fix round 8.6% of the time; with one extension that drops to 4.1%, while a flaky 80% case still fails the bar about 60% of the time.
+
+### What this means for you
+
+When /ship's measure loop prints needs-classify, read the listed reds and record each one with `ship-measure classify`; it decides for you. A hand-picked "provider" label is refused unless the trial's own failure cause shows a provider or transport error. The weekly sweep report (artifact `ship-measure-sweep-report`, also the job summary) lists each flagged case with its decision, cost and captures, ready for an agent to fix.
+
+### Itemized changes
+
+#### Added
+- `ship-measure classify`, `decide` and `extend`, and exit codes 5 (needs-classify) and 6 (EXTEND). EXTEND refuses to pool when any input changed (working tree, runner, Claude CLI, model, CI image, Bun, eval policy or harness version) and names the field; there is never a third batch.
+- Void batches: more than 30% of trials failing on provider evidence voids a batch, which is redispatched once; both batches are reported.
+- `ship-measure sweep` and `.github/workflows/eval-sweep.yml` (Mondays 12:00 UTC and on dispatch with `k`, `cap_usd` and `dry_run`). Config keys `ship_measure_sweep_cases` (5) and `ship_measure_sweep_budget_usd` (150, per 7 days, shared with every sweep that week). The workflow only reads; it never pushes or opens a pull request.
+
+#### Changed
+- Behavior cases are decided on the trial count over 12 (11 meets, 10 qualified, 9 extends; 22 and 20 of 24 pooled) instead of also requiring every panel to pass on its own; a contract violation still sends the case to a fix round at any count.
+- The `ship-measure report` table shows each round's decision and batches, and lists qualified results under their own heading.
+
+#### Fixed
+- `ship-measure measure` no longer refuses a case that shares its test file with other cases (for example `ship-exploratory-late-input`): the no-cost selection check before the first paid trial now accepts the per-case trial shard such a case lists.
+- `ship-measure measure` runs cases that keep native evidence (functional QA, docs faults) outside CI: each trial gets its own `EVALS_RUN_ID`, where before every trial stopped at "requires EVALS_RUN_ID" without starting a session.
+- The `plan-mode-no-op` gate case no longer times out on large pull requests: its CEO review reads a fixed small plan instead of the branch diff.
+
+#### For contributors
+- The bar is one pure module, `scripts/lib/measure-bar.ts`, pinned by `test/ship-measure-bar.test.ts`; the sweep is `scripts/ship-measure-sweep.ts`, pinned by `test/ship-measure-sweep.test.ts` and `test/eval-sweep-workflow.test.ts`. `eval:pass-rates` history loading is now `loadPassRateHistory()` in `scripts/eval-flake-rank.ts`, shared with the sweep.
+- Diagnostic trials still never become verdicts and never enter pass-rate history or EVAL_POLICY pooling. See `docs/TESTING_INTERNALS.md#ship-measure` and `#ship-measure-sweep`.
+
+## [1.91.32.0] - 2026-10-06
+
+**Codex second opinions work on macOS again, and text from a PR or reviewer can no longer run as a shell command.**
+**Every failure in this wave names its real cause and the fix.**
+
+Since v1.91.16.0, every Codex outside pass sourced from zsh (the macOS default, including Claude Code's Bash tool) reported `CODEX_MODEL: invalid`, so /ship, /review, /codex and the plan reviews ran without their outside voice. Greptile replies, the pre-existing-failure issue template and /spec's issue title put reviewer, diff and error text inside double quotes, where bash runs backticks. This release fixes both, and turns several "inconclusive" or "retry" messages into the actual cause. Contributor PRs were used as diagnosis and rewritten; each contributor is credited on the commit.
+
+### The numbers that matter
+
+| Check | v1.91.31.0 | v1.91.32.0 |
+|---|---|---|
+| `zsh -c 'source bin/gstack-codex-probe && _gstack_codex_select_model exec'` | `Module not found "/../scripts/..."`, `CODEX_MODEL: invalid` | `CODEX_MODEL: <model> (exec; source: ...)` |
+| Greptile reply that quotes a commit SHA in backticks | posts "Fixed in ." and runs the SHA as a command | posts the text byte for byte |
+| Codex usage-limit error at preflight | `MODEL_PROBE_INCONCLUSIVE ... proceeding`, re-probed in every skill | `CODEX_MODE: quota_exhausted` with Codex's reset line, cached 15 min |
+| /autoplan in a 52 MiB session journal | `code identity`, "Retry this phase-entry tool" (forever) | `code too_large` with the size and a recovery that keeps the work |
+| Weekly OSV scan | 10 findings (3 High) | no unignored findings |
+
+### What changes for you
+
+- **Codex works from zsh.** Sourced helpers (`gstack-codex-probe`, `gstack-egress-lib.sh`) locate themselves under bash and zsh; another shell, or a helper that cannot find itself, prints `CODEX_MODE: helper_unavailable` with a fix link instead of pretending you are logged out. Check it: `zsh -c 'source ~/.claude/skills/gstack/bin/gstack-codex-probe && _gstack_codex_select_model exec'` prints `CODEX_MODEL: <model> (...)`.
+- **Codex limits are named.** A usage limit (`insufficient_quota`, "You've hit your usage limit") is `CODEX_MODE: quota_exhausted`: Codex's own line with the reset time, no more Codex calls that run, and `GSTACK_CODEX_PROBE_RETRY=1` to re-probe early. A plain rate limit (HTTP 429) is `unverified (rate_limited)` and the review still runs.
+- **Free text travels as a file.** Reply bodies, issue titles and bodies, Codex prompts, design briefs and PR-body drafts are written by the agent to a private file under the project's `.gstack/tmp/` (excluded from git) and sent with `--body-file`/`-F body=@`. If the file was never written, nothing is sent and the skill prints the exact command to send it by hand. A lint fails on any free-text placeholder in a generated command.
+- **/autoplan in long sessions.** Over the 32 MiB journal limit, the guard says so, with the size, and gives the recovery: `/context-save`, a new session, `/context-restore`, then `/autoplan`.
+- **A red paid eval gets measured, not rerun blindly.** /ship runs the case alone (rule: 10 trials, needs 9), fixes the cause, re-measures, and runs the full gate once. It asks before spending more than $2 a trial and stops at $25 per case or 3 repair rounds (`ship_measure_*` config keys). Diagnostic trials never change a recorded verdict.
+- **Setup and auto-update refuse a hook that does not parse.** Setup registers the hooks that parse and names the broken one with its file and line; team-mode auto-update holds an incoming release whose hook would not parse, so your current hooks keep running.
+- **Router wording.** The root router routes only to skills in your session's skill list (skills you turned off in Claude Code are not routed to) and says when to answer directly; "When in doubt, invoke the skill" is gone. To update a CLAUDE.md that gstack wrote for you: `sed -i.bak "s/When in doubt, invoke the skill\./Route only to skills in the session's available-skills list; answer directly for quick questions or small scoped edits./" CLAUDE.md`.
+- **Spawned sessions never auto-grant consent.** Granting a consent or publishing data off the machine counts as irreversible in every spawned-session directive.
+- **Smaller fixes.** /autoplan names a shell-built snapshot init as the cause of its denial; Windows `browse chain` reads piped input (empty input is a usage error); Windows runtime roots run the checkout's browse server bundle (with a version-skew guard); redaction treats TypeScript types and JSX expressions as code only in TS/JSX files; /ship skips Greptile triage when there is no PR yet, saying why; /sync-gbrain no longer offers a call-graph build for a source with no code pages; Copilot on Windows runs bash blocks in Git for Windows Bash; /cso on Windows finds a trusted `docker.exe` and says native Windows Docker is not supported yet (static assessment only); a Java repo is no longer asked for `requirements.txt`; `GSTACK_DISABLE_GPU=off` enables WebGL; the config-mismatch refusal says another session started the daemon.
+
+### For contributors
+
+- The Codex watchdog (stock macOS, no `timeout`) freezes the command before reaping its children, so output can no longer leak after the deadline.
+- Tests that call a real `codex` run it with a private HOME and CODEX_HOME; the CSO missing-scanner test points Docker at a dead socket.
+- `scripts/ship-measure.ts` owns diagnostic measurement; see `docs/TESTING_INTERNALS.md#ship-measure`.
+- Not verified on Windows hardware: the Windows items are exercised by the Windows CI lanes and the new isolated-install journey in `windows-setup-e2e.yml`.
+
 ## [1.91.31.0] - 2026-10-06
 
 **Rails runtime qualification no longer fails at random when exporting the prepared app.**
