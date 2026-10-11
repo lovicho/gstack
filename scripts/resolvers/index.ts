@@ -32,6 +32,7 @@ import { generateScopeDrift, generateCrossReviewDedup, generateSharedCodeReuse }
 import { generateSlugEval, generateSlugSetup, generateBaseBranchDetect, generateDeployBootstrap, generateQAMethodology, generateCoAuthorTrailer, generateChangelogWorkflow, generateCodexWebSearchFlag, generateCodexModelConfigFlag, generateCodexReviewModelConfigFlag, generateClaudeModelFlag, generateSetupCommand } from './utility';
 import { generateLearningsSearch, generateLearningsLog } from './learnings';
 import { generateConfidenceCalibration } from './confidence';
+import { generateGateScanBlock } from './gate-scan';
 import { generateInvokeSkill, generateAutoplanReviewFile, generateAutoplanSnapshotTool, generateAutoplanPublicationHook, generateCeoModeHandoffHook } from './composition';
 import { generateReviewArmy } from './review-army';
 import { generateDxFramework } from './dx';
@@ -47,6 +48,10 @@ import { generateCommandReference, generateSnapshotFlags, generateBrowseSetup, g
 import { generateDesignDocDiscovery } from './design-doc-discovery';
 import { generateSharedLibsRubric, generateSafeGitPath } from './shared-libs';
 import { generateTestValueBar, generateTestValueMessage } from './test-value';
+import { generateImplementerDispatchRules } from './dispatch-rules';
+import { generatePlanRealityRows } from './plan-reality';
+import { generateSidewaysSweep, generateFlakeFixNumber } from './sideways';
+import { generateCoordinatorContract } from './coordinator-contract';
 import { generateQAScope, generateQAExploratory, generateQAFunctional, generateQAResource, generateQAReview, generateQAReviewPreflight, generateQAMethodReads } from './qa';
 
 export const RESOLVERS: Record<string, ResolverFn> = {
@@ -115,6 +120,7 @@ export const RESOLVERS: Record<string, ResolverFn> = {
   TEST_COVERAGE_GATE_SHIP: generateTestCoverageGateShip,
   TEST_VALUE_BAR: generateTestValueBar,
   TEST_VALUE_MESSAGE: generateTestValueMessage,
+  IMPLEMENTER_DISPATCH_RULES: generateImplementerDispatchRules,
   TEST_FAILURE_TRIAGE: generateTestFailureTriage,
   SPEC_REVIEW_LOOP: generateSpecReviewLoop,
   DESIGN_SKETCH: generateDesignSketch,
@@ -134,11 +140,15 @@ export const RESOLVERS: Record<string, ResolverFn> = {
   PLAN_COMPLETION_GATE_SHIP: generatePlanCompletionGateShip,
   PLAN_COMPLETION_AUDIT_REVIEW: generatePlanCompletionAuditReview,
   PLAN_VERIFICATION_EXEC: generatePlanVerificationExec,
+  PLAN_REALITY_ROWS: generatePlanRealityRows,
+  SIDEWAYS_SWEEP: generateSidewaysSweep,
+  FLAKE_FIX_NUMBER: generateFlakeFixNumber,
   CO_AUTHOR_TRAILER: generateCoAuthorTrailer,
   SETUP_COMMAND: generateSetupCommand,
   LEARNINGS_SEARCH: generateLearningsSearch,
   LEARNINGS_LOG: generateLearningsLog,
   CONFIDENCE_CALIBRATION: generateConfidenceCalibration,
+  GATE_SCAN_BLOCK: generateGateScanBlock,
   INVOKE_SKILL: generateInvokeSkill,
   AUTOPLAN_REVIEW_FILE: generateAutoplanReviewFile,
   AUTOPLAN_SNAPSHOT_TOOL: generateAutoplanSnapshotTool,
@@ -165,6 +175,7 @@ export const RESOLVERS: Record<string, ResolverFn> = {
   BRAIN_WRITE_BACK: generateBrainWriteBack,
   TASKS_SECTION_EMIT: generateTasksSectionEmit,
   TASKS_SECTION_AGGREGATE: generateTasksSectionAggregate,
+  COORDINATOR_CONTRACT: generateCoordinatorContract,
   SECTION,
   SECTION_INDEX,
 };

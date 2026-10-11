@@ -51,6 +51,18 @@ const WINDOWS_FRAGILE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 // when possible; this list is for environment-/runtime-specific tests where
 // the failure mode is structural rather than detectable via source-file scan.
 export const KNOWN_WINDOWS_INCOMPATIBLE: Array<{ file: string; reason: string }> = [
+  // C-pregate: these drive bin/gstack-regen, bin/gstack-pregate, bin/gstack-issue-links and
+  // bin/gstack-ship-receipt through test/helpers/pregate-fixture.ts runBin (spawnSync on the
+  // shebang file, which CreateProcess cannot exec) and run `node gen.js` / `node --test` fixture
+  // commands through the pre-gate's POSIX `bash -o pipefail` runner. The pure parsers and the
+  // import graph are covered by test/pregate-selection.test.ts, which the bin/ pattern excludes too.
+  { file: 'test/gstack-regen.test.ts', reason: 'spawns bin/gstack-regen through test/helpers/pregate-fixture.ts runBin (shebang via CreateProcess) and POSIX fixture regen commands' },
+  { file: 'test/pregate-invalidation.test.ts', reason: 'spawns bin/gstack-pregate and bin/gstack-ship-receipt through test/helpers/pregate-fixture.ts runBin (shebang via CreateProcess) and the pipefail lane runner' },
+  { file: 'test/ship-issue-intent.test.ts', reason: 'spawns bin/gstack-issue-links and bin/gstack-ship-receipt through test/helpers/pregate-fixture.ts runBin (shebang via CreateProcess) with a `gh` shell shim on PATH' },
+  // PR E2: lane ownership and evidence verification run bin/gstack-lane-check and bin/gstack-evidence
+  // through test/helpers/restamp-fixture.ts runBin (shebang via CreateProcess); the lib paths are
+  // exercised in the same file, so there is no Windows-safe split to keep.
+  { file: 'test/lane-coordination.test.ts', reason: 'spawns bin/gstack-lane-check and bin/gstack-evidence through test/helpers/restamp-fixture.ts runBin (shebang via CreateProcess) and reruns POSIX lane commands' },
   {
     file: 'test/ship-measure-seeded-fixture.test.ts',
     reason: 'drives a POSIX shell stub project (`./evals.sh` with a shebang) that CreateProcess cannot exec; the measure runner itself is covered by ship-measure.test.ts with in-process fake runners',
@@ -225,6 +237,29 @@ export const KNOWN_WINDOWS_INCOMPATIBLE: Array<{ file: string; reason: string }>
   {
     file: 'test/cso-scanner-cli.test.ts',
     reason: 'drives the prebuilt POSIX CSO launcher with /usr/bin/git and a POSIX-only PATH; native Windows launcher behavior is covered by the dedicated cso-windows-launcher gate',
+  },
+  // C-stamp (ship policy, restamp, tree receipt, evidence bundle, ship receipt):
+  // every case spawns bin/ shebang scripts and a #!/bin/sh `gh` shim through
+  // test/helpers/restamp-fixture.ts, so the source scan misses them.
+  {
+    file: 'test/gstack-ship-policy.test.ts',
+    reason: 'spawns bin/gstack-ship-policy (shebang) through test/helpers/restamp-fixture.ts; the policy schema and loader are pure lib code covered on the POSIX gates',
+  },
+  {
+    file: 'test/restamp-command-boundary.test.ts',
+    reason: 'spawns bin/gstack-restamp (shebang) and a POSIX release tool through test/helpers/restamp-fixture.ts',
+  },
+  {
+    file: 'test/tree-receipt-stamp-sensitive.test.ts',
+    reason: 'spawns bin/gstack-tree-receipt, bin/gstack-restamp and bin/gstack-evidence (shebangs) plus a #!/bin/sh gh shim through test/helpers/restamp-fixture.ts',
+  },
+  {
+    file: 'test/evidence-bundle-portability.test.ts',
+    reason: 'spawns bin/gstack-evidence and bin/gstack-tree-receipt (shebangs) through test/helpers/restamp-fixture.ts',
+  },
+  {
+    file: 'test/gstack-ship-receipt.test.ts',
+    reason: 'spawns bin/gstack-ship-receipt and bin/gstack-artifact (shebangs) plus a #!/bin/sh gh shim through test/helpers/restamp-fixture.ts',
   },
 ];
 
