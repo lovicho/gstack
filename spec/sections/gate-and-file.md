@@ -129,8 +129,7 @@ dispatch. `spec-quality-gate-secret-sink.test.ts` enforces this.
 
 ```bash
 
-_OUTSIDE_CFG=enabled # This caller has its own opt-in/skip control.
-if [ "$_OUTSIDE_CFG" = disabled ]; then
+if ! _OUTSIDE_CFG=$("$HOME/.claude/skills/gstack/bin/gstack-config" get --stored codex_reviews) || [ "$_OUTSIDE_CFG" = disabled ]; then
   echo 'CODEX_MODE: disabled'
 elif ( # GSTACK_ACTIVE_HOST names the harness, never the model.
 if { [ -n "${CODEX_THREAD_ID:-}" ] || [ -n "${CODEX_SANDBOX:-}" ] || [ "${GSTACK_ACTIVE_HOST:-}" = codex ]; }; then
@@ -149,7 +148,7 @@ else
 fi
 ```
 
-The historical `CODEX_MODE` variable describes **Codex** availability here. The invocation checks auth and the [policy](https://github.com/garrytan/gstack/blob/main/docs/model-policy.md) plan-review model. Missing/broken CLI: install or repair Codex; authentication failure: run `codex login`. Honor this caller’s existing opt-in/skip choice. Any non-ready outcome is missing outside coverage; follow the caller’s existing fallback. Never substitute another external provider.
+The historical `CODEX_MODE` variable describes **Codex** availability here. `CODEX_MODE: disabled` or a send's `consent_missing` line: `codex_reviews` is off or unreadable; do not ask; record `outside_status: disabled`. The invocation checks auth and the [policy](https://github.com/garrytan/gstack/blob/main/docs/model-policy.md) plan-review model. Missing/broken CLI: install or repair Codex; authentication failure: run `codex login`. Otherwise honor this caller’s opt-in/skip choice. Any non-ready outcome is missing outside coverage; follow the caller’s existing fallback. Never substitute another external provider.
 
 Write the prompt with the exact redaction-approved spec bytes using the Write tool; never shell-interpolate the raw draft. Keep hard delimiters and this boundary:
 
@@ -451,7 +450,7 @@ Handoff format. A lane reports in this order, identifiers first: PR URL (or `no 
 ```bash
 [ -r "${ARCHIVE_PATH:?ARCHIVE_PATH is not set: substitute the archived spec path}" ] || { echo "ERROR: cannot read $ARCHIVE_PATH; nothing was spawned." >&2; exit 1; }
 cd -- "${SPAWN_PATH:?SPAWN_PATH is not set: substitute the printed worktree path}" || exit 1
-[ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$(pwd -P)" ] || { echo "ERROR: $SPAWN_PATH is not a git worktree root; nothing was spawned." >&2; exit 1; }
+{ _p=$(git rev-parse --show-prefix 2>/dev/null) && [ -z "$_p" ] && [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ]; } || { echo "ERROR: $SPAWN_PATH is not a git worktree root; nothing was spawned." >&2; exit 1; }
 SPAWN_PATH=$(pwd -P)
 CONTRACT=$(~/.claude/skills/gstack/bin/gstack-autoplan contract) || { echo "ERROR: gstack-autoplan contract failed; nothing was spawned." >&2; exit 1; }
 { cat "$ARCHIVE_PATH"; printf '\n\n%s\n' "$CONTRACT"; } | (cd "$SPAWN_PATH" && GSTACK_SESSION_KIND=spawned claude -p 2>&1) &

@@ -1,5 +1,188 @@
 # Changelog
 
+## [1.91.92.0] - 2026-10-11
+
+**Outside reviews honor `codex_reviews` at the send, not in skill prose. Codex reasoning effort is a setting, and the README says what leaves your machine.**
+
+- **Consent in the binaries (#3102).** `gstack-codex-probe run-with-timeout`, `gstack-claude-code`, `gstack-outside-voice run` and the unattended `/autoplan` runner read `codex_reviews` before anything starts. When it is `disabled`, or the config can't be read, or the value is unknown, they refuse with `not_run` / `consent_missing` (exit 3). The refusal prints the fix command and links the `outside-review-consent-missing` troubleshooting anchor. `/ship` design-lite and `/design-review` no longer hard-code consent, so `codex_reviews=disabled` now stops them too. `/codex` and `/claude-code` pass `--user-invoked` because you asked for those reviews by name. `gstack-config get --stored <key>` prints `enabled`, `disabled`, `unset` or `unreadable` (exit 2).
+- **Reasoning effort (D1-A, #3098, closes #2934).** `run-with-timeout --effort <default>` uses `GSTACK_CODEX_EFFORT` first, then `gstack-config set codex_effort <level>`, then the gate's own default, and appends `model_reasoning_effort`. An invalid level stops before any Codex call. `/codex ... --xhigh` sets the env for that dispatch. `/spec` keeps `medium` inside its 120 s budget. `gstack-models list` shows the effective effort.
+- **Privacy text (#1081, #1080, #1150).** The README's Privacy & Telemetry section now lists:
+  - the telemetry fields and what is never sent
+  - the local `skill-usage.jsonl` (repo and branch are stripped before upload)
+  - the update check, which goes to GitHub
+  - outside-review egress and its first-send notice
+  - session markers and the timeline, which stay local
+
+  The telemetry prompt and the `gstack-config` header match it.
+
+Thanks @Lockyer228 (#3098) for the `GSTACK_CODEX_EFFORT` precedence and its probe tests, and @lubosxyz (#2934) for the original env override.
+
+## [1.91.91.0] - 2026-10-11
+
+**Review gates fail closed: a Codex reply that lists P1 findings is never `clean`, /autoplan survives a Claude Code auto-compaction, and a read-only /plan-eng-review finishes `DONE` instead of `BLOCKED` (Wave 9 lane B).**
+
+- **Outside-review severities (#3105).** `lib/outside-review-result.ts` now reads P0-P3 labels in label position for every gate that summarises a review, the `execution` gate behind `/codex` consult and challenge included: `**P1 — x**`, `**P1** — x`, `1. P2 — x`, a bare `P2 —`, `### P1` and table cells `| P1 |`, plus the label-position severity words that only `review`/`structured` read before. A P0-P3 token in label position that none of these forms reads (`## P1/P2 findings`) is `VERDICT: unverified` with the new reason `unparsed_severity`, an `UNPARSED: line N: "..."` line and its own troubleshooting anchor; parsed P0/P1 findings still win (exit 3) and print the unparsed line too. A reply whose last `Verdict:` line says `not ready` with no readable severity prints `FINDINGS: unspecified` and exits 3. Code fences and inline code are quotes, not labels; an unlabeled consult answer stays `clean`.
+- **Post-compaction journals (#3107).** Claude Code 2.1.293 writes the kept conversation again after an auto-compaction boundary: new uuids, relinked parents, zeroed usage, identical otherwise. The owned journal reader (`lib/claude-owned-journal.ts`) now collapses such a copy into its pre-boundary original for every record kind, so the publication guard no longer denies every phase entry with `tool_identity`, a copied `/autoplan` prompt no longer trips `init_own`, and a copied end turn plus typed prompt no longer disarms the guard. A copy that differs in anything else, or a duplicate with no boundary between, still fails closed.
+- **Read-only /plan-eng-review (#3106).** When the caller forbids writing the report or the review log, the review now follows **Report-back outcome**: it returns the full report and ledger labeled not persisted, records telemetry `success`, ends `DONE` with `PERSISTED: no`, and its last line is `PERSIST: <gstack-review-log command>` for the caller to run. No new completion status; a failed permitted save is still `BLOCKED`. With no saved Eng Review, /ship's readiness dashboard now says to run that `PERSIST:` line or rerun the review.
+
+Thanks @kolla23 (#3105)
+Thanks @kolla23 (#3106)
+Thanks @Mr-B-1 (#3107)
+
+## [1.91.90.0] - 2026-10-11
+
+**Windows checkouts stop breaking gstack's nested shell scripts on Linux, the timeline Stop hook repairs on Windows instead of timing out every turn, and the `/setup-gbrain` smoke test stops piping into `gbrain put`.**
+
+### What this means for you
+
+- **Nested scripts are LF everywhere (#3110).** `.gitattributes` pinned only the top-level `bin/` to LF, so Git for Windows (`core.autocrlf=true`) wrote skill `bin/` helpers, the Claude hook shims, `lib/cso/images/*` and `scripts/app/*` with CRLF. A Linux bash reading that checkout (a synced tree, WSL, a bind mount) failed with `set: pipefail: invalid option name`, and `/autoplan`'s publication hook exited 2, blocking every phase entry. Every tracked `#!` file now resolves to `eol=lf`.
+- **`./setup` repairs existing CRLF copies.** Pulling the new rule does not rewrite a file whose content did not change, so setup finds tracked files whose rule says LF but whose copy has CRLF and checks them out again as LF. A file you edited is left alone and named, with the command that rewrites it and keeps your edit (`docs/troubleshooting.md#setup-crlf-repair`).
+- **The timeline Stop hook returns at once and repairs (#3103).** Through Git Bash, `gstack-slug` took 2.2-2.8 s against the hook's 2 s budget, so on Windows the hook spent about 2.5 s on every turn and repaired nothing. It now reads the slug from gstack-slug's cache in-process (`GSTACK_PROJECT_SLUG` still wins). On a miss a hidden background process resolves the slug and repairs, one at a time under a lock, and a directory it cannot resolve is retried after 5 minutes instead of every turn.
+- **The `/setup-gbrain` smoke test writes the page to a temp file (#1675)** and runs `gbrain put "$SLUG" < file`, the shape gstack's other `gbrain put` instructions already use.
+
+### For contributors
+
+- `test/gitattributes-eol.test.ts` checks `git check-attr eol` for every tracked `#!` file and that no file git stores as binary is marked text (`*.icns` is now `binary`, since `scripts/app/*` would otherwise cover the app icon).
+- `test/setup-crlf-repair.test.ts` builds the broken state with a real `core.autocrlf=true` clone, runs setup's repair under the install registry lock, checks the repaired bytes and runs the hook.
+- `test/timeline-stop-hook-slug.test.ts` runs a copy of the hook against a slow stub `gstack-slug` and is force-included in the Windows lane. Native Windows latency is measured only if that lane runs it.
+
+Thanks @Mr-B-1 (#3110)
+Thanks @Peaky8linders (#3103)
+Thanks @ElliotDrel (#1675)
+
+## [1.91.89.0] - 2026-10-11
+
+**Windows installs stuck on the Git Bash hook false positive get a one-line recovery, the auto-updater stops trusting only its own checker, and setup can no longer delete the checkout it runs from.**
+
+Since 1.91.31, `gstack-hook-check` on Windows (Git Bash) reported every TypeScript hook as `bun could not bundle the TypeScript entry`: Git Bash hands native Bun `C:/…` paths while the checker looked them up as `/c/…`. Setup refused the hooks, and team-mode auto-update held every later release because it re-checked each one with the broken installed checker. Code on main cannot reach those installs, so the troubleshooting page their messages link to now carries the recovery.
+
+### What this means for you
+
+- **Stuck on Windows?** Run `cd ~/.claude/skills/gstack && git pull --ff-only --autostash && ./setup` (your install directory if it differs). It clears the setup refusal, the held auto-update and `/gstack-upgrade`'s `is not a gstack checkout` refusal. `docs/troubleshooting.md#auto-update-hook-does-not-parse` and `#setup-hook-does-not-parse` say so instead of "Nothing to do locally".
+- **The hook check reads both path spellings.** Bun's entry, input and error paths are mapped back to Git Bash's spelling, so healthy hooks pass and a real syntax error still fails with its own file and line.
+- **One checker bug can't hold every release again.** The auto-updater runs the incoming release's own `bin/gstack-hook-check` on the extracted archive. Only a verified, complete report counts; a crash, empty output or unreadable report falls back to the installed checker, and when neither gives one the update is held as `hook-check-unavailable` with the fix command. A pass the installed checker disputes is logged as `HOOK_CHECK_DISAGREE`.
+- **`/gstack-upgrade` and `/spec` work in Git Bash.** Their checkout-root guards check `git rev-parse --show-prefix` instead of comparing `--show-toplevel` (`C:/…`) with `pwd -P` (`/c/…`); a static test rejects the old comparison in skill bash.
+- **`/review` and `/ship` record a start in a linked worktree on Windows.** `gstack-wtree` treats Git for Windows' `C:/…` `--git-path` answers as absolute (#3101).
+- **Setup never replaces a runtime root that holds its own checkout (#3084).** With the checkout at `~/.cursor/skills/gstack`, `./setup --host cursor` used to swap the Cursor runtime root in over it and delete it. Setup now refuses before writing anything (and again in `_activate_runtime_root`, which every host arm that swaps a root goes through; Kiro, which writes into its root in place, is refused too), prints the commands that move the checkout out, and `./setup --status` suggests that move instead of the destructive command. The install summary says "previous install was left in place" only after checking that the checkout, skills directory and runtime root still exist.
+
+### For contributors
+
+- `bin/gstack-path-spelling.sh` (shell spelling, native spelling, same-path, absolute, within) and its TS twin `lib/path-spelling.ts` own the `/c/…` vs `C:/…` class; only this release's call sites moved to them.
+- The Windows lane force-includes `test/setup-hook-syntax-gate.test.ts`; `windows-setup-e2e` runs the hook check on the checkout, the upgrade guard, and the documented recovery from a release with the false positive.
+
+Thanks @yuriysan (#3112)
+Thanks @szsunyuan (#3108, #3128)
+Thanks @dmfrede (#3101)
+Thanks @skleinbe-ny (#3088)
+Thanks @bkermen (#3100)
+Thanks @andrewkjankowski (#3084)
+
+## [1.91.88.0] - 2026-10-11
+
+**Transcript ingest lands on gbrain 0.60, and `/retro global` counts every Claude Code session in its real repository.**
+
+- **Transcript sources get a checkout (#3097).** gbrain 0.60's managed persistence refuses any import into a source with no active worktree binding on this host, and gstack registered every transcript source path-less, so every transcript page was refused (`owner_unavailable`) on every run. On a managed brain each transcript source is now bound to its own checkout, `<state root>/gbrain-transcript-sources/<source-id>/`, created by gstack as a git repository of its own (so gbrain binds that directory and never an enclosing checkout such as a brain-synced state root). A path-less source an earlier run registered is bound on the next run, the same way `gbrain sources add <id> --path` attaches a path to it; a resumed timeout checkpoint is admitted the same way before it imports. After each import the checkout holds one commit, the current page files, amended in place with no reflog so `git gc --auto` prunes old snapshots; it stays uncommitted while any page in the source lacks its file, so `gbrain sync` of the source can never soft-delete those pages. gstack never binds a source someone else holds (another host, or another directory on this host) and prints the owner, the inspect command and the release or re-bind commands, and it binds nothing under an ephemeral state root (`GSTACK_EPHEMERAL=1`). Classic (unmanaged) brains keep path-less sources, unchanged.
+- **global-discover reads the session's own cwd (#1315).** Claude Code project directories were decoded by turning every `-` into `/`, which fails for every hyphenated path, and the cwd fallback read a 64 KB prefix that recent sessions' first record outgrows. Each session's cwd is now read from its own JSONL, whole lines up to 1 MiB (a longer line is skipped and counted in a warning), and resolved through git to its worktree root: root and subdirectory sessions count the same, linked worktrees count with their repository, a nested repository counts as itself, and sessions outside a repository are not counted as one.
+
+Thanks @Simba3696 for the root-cause diagnosis (#3097).
+Thanks @Akagilnc for the two-bug diagnosis and measurements (#1315).
+
+## [1.91.87.0] - 2026-10-11
+
+**The paid CSO producer gives `/cso` the Agent tool users have, so independent review and repair verification can run in the evaluation. The producer's receipt now counts subagent tokens.**
+
+The current-skill smoke reports (run 38090891646) said repair verification was "not performed": `record-review` refused the review with "Repair review must be explicitly independent". The producer started Claude with `--tools Bash,Write`, so the Agent tool was missing. `/cso` could start no independent reviewer, honestly declined to attest independence, and so every repair stayed `not_attempted`. Users' Claude Code has the Agent tool. The v2 skill's parallel finding verification uses it too, and fell back to self-verification in the v2 baseline for the same reason.
+
+### What this means for you
+
+- **The producer allows `Bash,Write,Agent`.** Subagents inherit the whole policy. Claude Code 2.1.263, replayed against a mock API through the real producer, shows this in practice:
+  - A subagent has only Agent, Bash and Write, and no MCP servers.
+  - Its launcher calls run unsandboxed and reach Docker. Its other Bash is denied, including chained, path-variant and `dangerouslyDisableSandbox` commands.
+  - `--restricted` keeps its Write calls inside the producer's work and helper directories.
+  - Read, WebFetch, ListMcpResourcesTool and `mcp__*` tools are unavailable to it.
+  - A subagent's `record-review` is accepted (`self_attested`), and `verify` then passes the review check.
+- **Policy revision `claude-2.1.263-cso-v2`.** The tool set changed, so the producer policy identity changed with it. A recorded v2 baseline bound to `cso-v1` no longer matches, and the baseline must be measured again under this policy.
+- **Subagent tokens are counted.** A `result` event's `usage` covers only the main thread's last turn. The receipt now takes the session total from `modelUsage` and sums turns across every `result`. A background subagent gives the main thread a second result. A killed run also counts the subagent messages it streamed.
+
+### Itemized changes
+
+#### Changed
+- `test/helpers/providers/claude.ts`: `--tools Bash,Write,Agent` (`CLAUDE_PRODUCER_BUILTIN_TOOLS`). `assertClaudeProducerSandboxPolicy` also pins `--tools`, `--permission-mode dontAsk` and exactly one each of `--restricted`, `--safe-mode` and `--strict-mcp-config`. It refuses `--mcp-config`, `--agents`, `--plugin-dir`, `--setting-sources`, `--disallowed-tools` and the permission-bypass flags.
+- `test/helpers/providers/claude-stream.ts`: tokens from `modelUsage`, turns summed over results, subagent messages counted once by message id, and only main-thread text kept as a killed run's output.
+- `scripts/cso-eval-producer.ts`: Claude policy revision `claude-2.1.263-cso-v2`.
+
+#### For contributors
+- `test/provider-model-defaults.test.ts`: the tool list and each new policy refusal.
+- `test/claude-producer-stream.test.ts`: subagent accounting with the event shapes Claude Code 2.1.263 printed in the replay, including a background subagent's second result and a killed run.
+
+## [1.91.86.0] - 2026-10-11
+
+**browse follows the proxy your shell already uses, writes PDFs on Windows machines whose temp dir is an 8.3 short path, and stops spawning `--config=NUL` children that crashed Bun 1.3.10 (Wave 9, lane E).**
+
+### What this means for you
+
+- **Proxy from the environment (#915).** Without `--proxy`, browse takes the proxy from `BROWSE_PROXY_URL`, then `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` (upper case before lower case). `BROWSE_PROXY_URL=direct` opts out. `NO_PROXY` becomes Chromium's bypass list, and loopback is always bypassed. The proxy and the `NO_PROXY` rules are part of the daemon config, so a session with a different environment is refused with the variable named instead of silently reusing a daemon that routes differently. The refusal offers `browse stop`, which now stops any daemon whatever its proxy or headed settings. A standard variable that doesn't parse (curl-style `host:port`) prints a warning and browse connects directly; a bad `--proxy` or `BROWSE_PROXY_URL` still fails, so a typo never quietly exposes your IP. `socks5h://` works as `socks5://`. See BROWSER.md, "Proxy from environment".
+- **8.3 temp paths on Windows (#3104).** `make-pdf` and `browse pdf` failed with `Path must be within: C:\Users\BURCIN~1\...` because the safe directories and the target went through different realpath functions. Both sides now use one (`fs.realpathSync.native`), resolved paths compare exactly, and only a tail that doesn't exist yet is case-folded on Windows.
+- **No more Bun crash windows on Windows (#3085).** The terminal agent, the native-cookie supervisor and its worker passed `--config=NUL`, which panicked Bun 1.3.10 at flag parsing; the respawn loop turned that into a crash window every few seconds. All three now get an empty `bunfig.toml` created in a private directory and re-checked to be zero bytes before each spawn. POSIX keeps `/dev/null`.
+
+### Itemized changes
+
+#### Changed
+- `browse/src/proxy-config.ts`: `resolveProxy` (precedence, `direct`, cred policy for env URLs, warning fallback), `noProxyToChromiumRules`, `withLoopbackBypass`, `serverProxyEnv`; `socks5h` accepted as `socks5`; `computeConfigHash` takes the `NO_PROXY` rules (unchanged hash when there are none).
+- `browse/src/cli.ts`: resolved proxy source and bypass reach every server launch (start, crash restart, headed connect and its supervisor); the startup line names the source; `proxyMismatchLines` refusal; `browse stop` skips the config-mismatch check.
+- `browse/src/server.ts`, `browse/src/browser-manager.ts`: Chromium gets the bypass rules; the state file records the redacted proxy, its source and its bypass.
+- `browse/src/path-security.ts`: `resolveRealPath`, one realpath for safe directories and targets. `browse/src/write-commands.ts`: `cookie-import` uses `validateReadPath`.
+- `browse/src/bun-child-config.ts`: `emptyBunConfig()`; `bunChildFlags()` replaces `BUN_CHILD_FLAGS`.
+
+#### For contributors
+- `browse/test/proxy-env.test.ts`, `browse/test/proxy-env-daemon.test.ts` (a local proxy across launch, reuse, a NO_PROXY-only change, `direct` and restart), `browse/test/path-security-realpath.test.ts`, `browse/test/bun-child-config.test.ts`.
+
+Thanks @ningfeemic-dev (#916)
+Thanks @bkermen (#3104)
+Thanks @adammartin0087 (#3085)
+
+## [1.91.85.0] - 2026-10-11
+
+**`/cso` works on Windows Git 2.56 and gets Docker on macOS, `/test-audit` and `/ship` loop correctly under zsh, and the deploy skills stop at the honest point (Wave 9 Lane D).**
+
+- **`/cso` on Git for Windows 2.56.** Every CSO Git child, and the eval fixture and producer identity reads, now set `GIT_CONFIG_GLOBAL=/dev/null` on every platform. Git 2.56 rejects `NUL` there ("unable to access 'NUL'"), so `/cso` could not read any repository on Windows and `doctor` reported `static-snapshot: missing`. `GIT_CONFIG_NOSYSTEM=1` stays, POSIX is unchanged, and a new free test that also runs in the Windows CI shards proves `git config --global --list` is empty under the CSO environment. Thanks @Alfabit7 (#3082).
+- **`/cso` admits the local Docker socket on macOS.** Bun's `realpathSync` opens its target to resolve it, and a Unix socket throws `EOPNOTSUPP`, so every macOS run rejected Docker and fell back to static-only. On exactly that error the socket path is now resolved without opening it (canonical parent plus `lstat`/`readlink`); the endpoint must still be a local `unix://` socket pinned by device and inode, TCP and SSH endpoints are still rejected, and Linux takes the unchanged path. The registry-broker socket mount uses the same resolver. Thanks @nathanshox (#3094).
+- **zsh-safe file loops.** `/test-audit`'s near-duplicate seed and `/ship`'s base-control fixture copy looped with `for f in $VAR`, which zsh (the Bash tool's shell on macOS) runs once with the whole list. Both now split the list explicitly, and a static test rejects any generated bash block that loops over an unquoted variable. Thanks @vilano93 (#3109).
+- **`/setup-deploy` stops when nothing is live yet.** The deploy-trigger question separates "nothing is deployed yet" from "this project never deploys". The first stops and writes nothing, telling you to bring the site up with the platform's own tool and re-run `/setup-deploy`; the second still records the `none` configuration. Thanks @mikehasa (#3095).
+- **`/land-and-deploy` runs a recorded command trigger only with approval.** When Deploy Configuration records a command as the deploy trigger, Step 5 says production has not moved, names the command and asks you to run it, or runs it only with your explicit approval, before polling for a deployment tied to the merge; a zero exit is not revision proof. Thanks @mikehasa (#3096).
+- **TODOS.md** records the Wave 9 triage: the remaining open P2/P3 bugs by area with their root-cause files and sizes, the parked items (#2118, #2623, #3061, #3084's legacy Cursor folders, #1315's session wording, the `gbrain put` stdin pipe from #1675) and the 73 feature requests grouped into twelve themes with counted demand.
+
+## [1.91.84.0] - 2026-10-11
+
+**A paid CSO baseline can be scored, and it measures what audits found. Three producer/scorer mismatches made gstack's own collect reject every real producer receipt from the first full baseline. Collect and score now accept real receipts of every kind, a test feeds them through, and findings count from every finished report, with completeness kept as its own measured rate.**
+
+The first full paid v2 baseline produced 64 receipts and 64 judge records, then scored `unmeasured` with `INVALID_PRODUCER_RECEIPT`. Run against that run's retained artifacts, collect failed on three separate mismatches in turn:
+
+1. **Artifact order.** The producer sorted its artifact inventory with `localeCompare`, so `package.json` came before `README.md`. Collect required strict code-unit order, and 62 of 64 receipts failed.
+2. **Per-platform catalog bytes.** Next came `UNMATCHED_PRODUCER_INSTALLATIONS`. Each platform's producer unit generated its own evaluation catalog, and `evaluation-candidate` stamps `qualifiedAt` with the current time. The two embedded catalogs differed only in that timestamp and the evidence digest over it.
+3. **Case-id namespace.** The last mismatch is in the private evaluator: judges named matched cases by their private id instead of the matrix's opaque id. The evaluator fixes it at its own boundary.
+
+### What this means for you
+
+- **Findings count from every finished report.** Before this, the scorer counted a cell's findings and runtime outcomes only when the helper report was `complete`, meaning no gap and every domain assessed. Real audits nearly always record some gap, such as no web advisory lookup or credential liveness left untested, so all 64 paid cells scored `partial` and the baseline found 0 of 32 seeded issues. `EvalResult` now carries a required `reportFinished` (helper status `finished`). Precision, recall, found seeded issues, runtime outcomes and tested repairs count from finished reports. A running or missing report still counts nothing, and neither does a report behind a failed producer receipt (a timeout, a failed post-run check, or output withheld for a credential), whatever the judge read there; that report also counts as not complete for the two gates below. Completeness is still measured on its own: each group reports `reports` (complete) and `finishedReports`, and the existing `mandatoryReports` and `matchedCompleteMatrix` gates still require complete reports. No threshold changed.
+- **Inventories are checked for unique paths, not order.** The order stays bound by the inventory's identity hash. New producers sort by code unit, so the identity no longer depends on locale.
+- **`evaluation-candidate --created-at <ISO time>`** pins every runtime's `qualifiedAt`. Builds given the same value write identical catalog bytes, so per-platform units embed the same catalog.
+- **`collectProducerReceipts(…, embeddedCatalogs)`** handles units that already embedded different catalogs. When the platforms' catalog hashes differ, it accepts them only if the supplied catalog bodies hash to each platform's `runtimeSha256`, validate, share revision and scanner identity, and are identical apart from `qualifiedAt` and the evidence digest. The batch then carries those bodies, and scoring re-checks them. Without bodies, or with any other difference, the result is still `UNMATCHED_PRODUCER_INSTALLATIONS`.
+
+### Itemized changes
+
+#### Changed
+- `scripts/cso-eval.ts`: `EvalResult.reportFinished` (required, implied by `reportComplete`, implies `reportPresent`) gates counted findings and outcomes. Groups add `finishedReports`. Collected scoring and `createEvalBaseline` count a failed receipt's result as neither finished nor complete.
+- `scripts/cso-eval-producer.ts`: artifact inventory sorted by code unit.
+- `scripts/cso-eval.ts`: `validateArtifactInventory` requires unique paths. `assertPlatformIdentities` accepts the catalog-equivalence proof. `ProducerBatch.embeddedCatalogs` is optional.
+- `scripts/cso-runtime-promotion.ts`: `evaluation-candidate` takes an optional `--created-at`. Documented in `docs/cso-release-qualification.md`.
+
+#### For contributors
+- `test/cso-eval.test.ts`: finished partial reports count findings while the completeness gates still fail. Running and missing reports count nothing. A baseline finds a seeded issue in a finished partial report and never in a running or missing one.
+- `test/cso-eval.test.ts`: in the real-receipt baseline, a seeded issue is found exactly where the vulnerable cell's receipt succeeded.
+- `test/cso-eval.test.ts`: real producer receipts, one per kind (succeeded, span-redacted, credential-withheld, timeout, post-run check failure), with mixed-case helper artifacts, go through collect, `createEvalBaseline` and `scoreCollectedEval`. Locale-ordered inventories are accepted and duplicate paths rejected. Catalog equivalence passes with the bodies and fails without them, with a body missing, duplicated, or with a moved image.
+- `test/cso-runtime-promotion.test.ts`: two `evaluation-candidate --created-at` builds write identical bytes.
+
 ## [1.91.83.0] - 2026-10-11
 
 **gstack ships itself under `stamp-at-merge`.** `.gstack/ship-policy.json` flips `queue_mode` to `stamp-at-merge`, `bump` to `patch` and names `garrytan` under `maintainers`. The version is now allocated once, when the PR is next in the queue (`gstack-restamp --next --expect-base --expect-order`), instead of claimed at open and re-slotted on every reorder; every bump is PATCH, so unattended ships never meet the MINOR/MAJOR prompt; and `/review` contributor mode reads the maintainer set from the file instead of calling the collaborators API. `docs/ship-policy.md` gains the queue-side procedure: what a PR carries before its stamp, who runs the restamp and when, and what the merging thread verifies on the exact SHA instead of "VERSION above main".
@@ -2465,7 +2648,6 @@ What this means for anyone shipping here: PRs get one honest paid verdict faster
 #### For contributors
 - `bun run eval:flake-rank` (with `--json`, `--dir`, `--since-days`) is the promotion-clock dial; the WS16 required-check decision reads it.
 - The overhaul plan (16 workstreams, reviewed by CEO + eng passes with two cross-model outside voices) continues: budget-aware shard walls, PTY readiness events, free-suite splits, judge determinism, and required-check promotion are the next waves.
-
 
 ## [1.76.0.0] - 2026-08-31
 
@@ -6315,7 +6497,6 @@ If you run `/retro` on a Conductor branch that's been around for a few days, the
 - Defer-doc artifact `~/.gstack-dev/plans/1539-framework-aware-review.md` describes the multi-week framework-aware ORM verification extension (Django/Rails/SQLAlchemy detection, model-introspection helpers, migration-history-aware checks) intentionally deferred from this wave. Promote to active plan when v1.43.0.0 ships and a second high-volume FP report lands on a different framework, or a follow-up retro shows the lighter quoted-line gate doesn't deliver measurable FP reduction.
 - Wave shape preserved from Daegu pattern: ONE bundled PR with bisect commits, atomic squashed commits for `.tmpl` edit + `gen:skill-docs` regen pairs, intermediate verification checkpoints, original contributors credited in commit author + footer. See `[[feedback_one_pr_fix_waves]]` in agent memory.
 
-
 ## [1.43.1.0] - 2026-05-21
 
 ## **Local gbrain PGLite now defaults to Voyage's code-specialized embedding model when `VOYAGE_API_KEY` is set.**
@@ -6363,7 +6544,6 @@ If you have `VOYAGE_API_KEY` set and run `/setup-gbrain` on a fresh machine, `gb
 
 **Regenerated**
 - `setup-gbrain/SKILL.md`, `sync-gbrain/SKILL.md` — refreshed via `bun run gen:skill-docs --host all` after the template edits
-
 
 ## [1.43.0.0] - 2026-05-20
 
